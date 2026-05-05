@@ -433,34 +433,147 @@ function setupDashboard(user) {
     const addGoalBtn = document.getElementById('addGoalBtn');
     const goalList = document.getElementById('goalList');
 
+    let goalTimerInterval = null;
+
     function renderGoals() {
         goalList.innerHTML = '';
         user.goals.forEach((goal, index) => {
             const li = document.createElement('li');
-            li.className = 'goal-item';
+            li.className = 'goal-item flex-col';
+            li.style.alignItems = 'flex-start';
+            li.style.gap = '0.5rem';
+            
+            const isCompleted = goal.completed;
+            const progressPct = Math.min(100, Math.round(((goal.spentTime || 0) / (goal.requiredTime || 1)) * 100));
+
             li.innerHTML = `
-                <div class="goal-content">
-                    <input type="checkbox" class="goal-checkbox" ${goal.completed ? 'checked' : ''} data-index="${index}">
-                    <span style="${goal.completed ? 'text-decoration: line-through; opacity: 0.6;' : ''}">${goal.text}</span>
+                <div class="flex-between" style="width: 100%;">
+                    <div class="goal-content">
+                        <input type="checkbox" class="goal-checkbox" ${isCompleted ? 'checked' : ''} data-index="${index}">
+                        <span style="${isCompleted ? 'text-decoration: line-through; opacity: 0.6;' : ''}">
+                            ${goal.text}
+                        </span>
+                    </div>
+                    <button class="btn btn-outline" style="padding: 0.2rem 0.5rem; border: none;" onclick="deleteGoal(${index})">
+                        <i class="fa-solid fa-trash" style="color: var(--danger-color)"></i>
+                    </button>
                 </div>
-                <button class="btn btn-outline" style="padding: 0.2rem 0.5rem; border: none;" onclick="deleteGoal(${index})">
-                    <i class="fa-solid fa-trash" style="color: var(--danger-color)"></i>
-                </button>
+                ${!isCompleted && goal.requiredTime ? `
+                <div class="flex-between" style="width: 100%; font-size: 0.85rem; opacity: 0.9;">
+                    <div class="flex-center" style="gap: 0.5rem;">
+                        <button class="btn ${goal.isRunning ? 'btn-danger' : 'btn-outline'}" style="padding: 0.2rem 0.5rem; font-size: 0.8rem;" onclick="toggleGoalTimer(${index})">
+                            <i class="fa-solid ${goal.isRunning ? 'fa-pause' : 'fa-play'}"></i> ${goal.isRunning ? 'Pause' : 'Start'}
+                        </button>
+                        <span>${goal.spentTime || 0} / ${goal.requiredTime} mins</span>
+                    </div>
+                    <div style="flex: 1; margin: 0 1rem; background: var(--card-border); height: 6px; border-radius: 3px; overflow: hidden;">
+                        <div style="width: ${progressPct}%; height: 100%; background: var(--primary-color); transition: width 0.3s;"></div>
+                    </div>
+                </div>
+                ` : ''}
             `;
             goalList.appendChild(li);
         });
 
-        document.querySelectorAll('.goal-checkbox').forEach(cb => {
-            cb.addEventListener('change', (e) => {
-                const idx = e.target.dataset.index;
-                user.goals[idx].completed = e.target.checked;
-                if(user.goals[idx].completed) user.stats.points += 10;
+        let activeGoalIndex = null;
+        const goalSummaryModal = document.getElementById('goalSummaryModal');
+        const closeGoalSummaryBtn = document.getElementById('closeGoalSummaryBtn');
+        const submitGoalSummaryBtn = document.getElementById('submitGoalSummaryBtn');
+        const goalSummaryText = document.getElementById('goalSummaryText');
+
+        if (closeGoalSummaryBtn && submitGoalSummaryBtn) {
+            closeGoalSummaryBtn.onclick = () => {
+                goalSummaryModal.classList.remove('active');
+                if (activeGoalIndex !== null) {
+                    user.goals[activeGoalIndex].completed = false; // Revert if cancelled
+                    updateUserRecord(user);
+                    renderGoals();
+                    activeGoalIndex = null;
+                }
+            };
+            submitGoalSummaryBtn.onclick = () => {
+                const summary = goalSummaryText.value.trim();
+                if (summary.length < 20) {
+                    showToast('Summary must be at least 20 characters!', 'fa-triangle-exclamation');
+                    return;
+                }
+                user.stats.points += 10; // Extra points for summary + completion
+                user.goals[activeGoalIndex].summary = summary;
+                user.goals[activeGoalIndex].completionTime = new Date().toISOString();
                 updateUserRecord(user);
                 renderGoals();
                 updateDashboardUI(user);
+                goalSummaryModal.classList.remove('active');
+                showToast('Goal completed! +10 Points', 'fa-star');
+                goalSummaryText.value = '';
+                activeGoalIndex = null;
+            };
+        }
+
+        document.querySelectorAll('.goal-checkbox').forEach(cb => {
+            cb.addEventListener('click', (e) => {
+                const idx = e.target.dataset.index;
+                const goal = user.goals[idx];
+                if (!goal.completed && (goal.spentTime || 0) < (goal.requiredTime || 0)) {
+                    e.preventDefault();
+                    showToast(`You must complete the required time (${goal.requiredTime} mins) before marking this goal as done.`, 'fa-triangle-exclamation');
+                    return;
+                }
+            });
+
+            cb.addEventListener('change', (e) => {
+                const idx = e.target.dataset.index;
+                const goal = user.goals[idx];
+                
+                goal.completed = e.target.checked;
+                goal.isRunning = false;
+                
+                if(goal.completed) {
+                    activeGoalIndex = idx;
+                    if(goalSummaryModal) goalSummaryModal.classList.add('active');
+                } else {
+                    updateUserRecord(user);
+                    renderGoals();
+                    updateDashboardUI(user);
+                }
             });
         });
     }
+
+    window.toggleGoalTimer = function(index) {
+        user.goals.forEach((g, i) => { if (i !== index) g.isRunning = false; }); 
+        user.goals[index].isRunning = !user.goals[index].isRunning;
+        updateUserRecord(user);
+        renderGoals();
+    };
+
+    if (goalTimerInterval) clearInterval(goalTimerInterval);
+    goalTimerInterval = setInterval(() => {
+        let needsRender = false;
+        if (user && user.goals) {
+            user.goals.forEach((goal) => {
+                if (goal.isRunning && !goal.completed) {
+                    if (typeof goal.spentSeconds === 'undefined') goal.spentSeconds = 0;
+                    goal.spentSeconds += 1;
+                    
+                    // Update progress visually every second instead of re-rendering everything
+                    if (goal.spentSeconds >= 60) {
+                        goal.spentSeconds = 0;
+                        goal.spentTime = (goal.spentTime || 0) + 1;
+                        needsRender = true;
+                        if (goal.spentTime === goal.requiredTime) {
+                            showToast(`Time completed for "${goal.text}"! You can now mark it as done.`, 'fa-star');
+                            goal.isRunning = false;
+                        }
+                    }
+                }
+            });
+            if (needsRender) {
+                updateUserRecord(user);
+                renderGoals();
+            }
+        }
+    }, 1000);
 
     window.deleteGoal = function(index) {
         user.goals.splice(index, 1);
@@ -470,11 +583,24 @@ function setupDashboard(user) {
 
     addGoalBtn.addEventListener('click', () => {
         const text = goalInput.value.trim();
-        if (text) {
-            user.goals.push({ text, completed: false });
+        const timeInput = document.getElementById('goalTimeInput');
+        const timeVal = parseInt(timeInput ? timeInput.value : 0);
+        
+        if (text && timeVal > 0) {
+            user.goals.push({ 
+                text, 
+                requiredTime: timeVal, 
+                spentTime: 0, 
+                spentSeconds: 0, 
+                completed: false, 
+                isRunning: false 
+            });
             updateUserRecord(user);
             goalInput.value = '';
+            if(timeInput) timeInput.value = '';
             renderGoals();
+        } else {
+            showToast("Please enter a goal title and required minutes.", "fa-xmark");
         }
     });
 
@@ -492,31 +618,154 @@ function setupDashboard(user) {
     const generatePlanBtn = document.getElementById('generatePlanBtn');
     const timetableContainer = document.getElementById('timetableContainer');
     if (generatePlanBtn && timetableContainer) {
+        // Add subject button logic
+        const addSubjectBtn = document.getElementById('addSubjectBtn');
+        const subjectList = document.getElementById('subjectList');
+        if (addSubjectBtn && subjectList) {
+            addSubjectBtn.addEventListener('click', () => {
+                const newEntry = document.createElement('div');
+                newEntry.className = 'subject-entry flex-col';
+                newEntry.style = 'border: 1px solid var(--card-border); padding: 0.5rem; border-radius: 8px; gap: 0.5rem; margin-top: 0.5rem;';
+                newEntry.innerHTML = `
+                    <div class="flex-between">
+                        <input type="text" class="form-input subject-name" placeholder="Subject (e.g. Math)" style="flex: 1;">
+                        <button class="btn btn-outline" style="padding: 0.2rem 0.5rem; border: none; margin-left: 0.5rem;" onclick="this.parentElement.parentElement.remove()">
+                            <i class="fa-solid fa-trash" style="color: var(--danger-color)"></i>
+                        </button>
+                    </div>
+                    <div class="flex-between" style="gap: 0.5rem;">
+                        <select class="form-input subject-priority" style="padding: 0.5rem; font-size: 0.8rem;">
+                            <option value="3">High Priority</option>
+                            <option value="2">Medium Priority</option>
+                            <option value="1">Low Priority</option>
+                        </select>
+                        <select class="form-input subject-difficulty" style="padding: 0.5rem; font-size: 0.8rem;">
+                            <option value="hard">Hard</option>
+                            <option value="medium">Medium</option>
+                            <option value="easy">Easy</option>
+                        </select>
+                    </div>
+                `;
+                subjectList.appendChild(newEntry);
+            });
+        }
+
         generatePlanBtn.addEventListener('click', () => {
-            const subject = document.getElementById('plannerSubject').value.trim() || 'Study';
-            const hours = parseFloat(document.getElementById('plannerHours').value) || 1;
+            const subjectEntries = document.querySelectorAll('.subject-entry');
+            let subjects = [];
             
-            const totalMinutes = hours * 60;
-            let currentMin = 0;
+            subjectEntries.forEach(entry => {
+                const name = entry.querySelector('.subject-name').value.trim();
+                const priority = parseInt(entry.querySelector('.subject-priority').value);
+                const difficulty = entry.querySelector('.subject-difficulty').value;
+                if (name) {
+                    subjects.push({ name, priority, difficulty });
+                }
+            });
+
+            if (subjects.length === 0) {
+                showToast("Please add at least one subject.", "fa-triangle-exclamation");
+                return;
+            }
+
+            const startTimeInput = document.getElementById('plannerStartTime').value;
+            const endTimeInput = document.getElementById('plannerEndTime').value;
+            const sessionLen = parseInt(document.getElementById('plannerSessionLen').value);
+            const peakFocus = document.getElementById('plannerPeakFocus').value;
+            
+            if (!startTimeInput || !endTimeInput) {
+                showToast("Please set start and end times.", "fa-triangle-exclamation");
+                return;
+            }
+
+            let start = new Date();
+            let end = new Date();
+            const [sh, sm] = startTimeInput.split(':');
+            start.setHours(parseInt(sh), parseInt(sm), 0, 0);
+            
+            const [eh, em] = endTimeInput.split(':');
+            end.setHours(parseInt(eh), parseInt(em), 0, 0);
+            
+            if (end <= start) {
+                end.setDate(end.getDate() + 1); // next day if end time is past midnight
+            }
+            
+            const totalMinutes = (end - start) / 60000;
+            
+            if (totalMinutes < sessionLen) {
+                showToast("Total time is less than one session.", "fa-triangle-exclamation");
+                return;
+            }
+
+            let totalWeight = subjects.reduce((acc, curr) => acc + curr.priority, 0);
+            
             let blocks = [];
+            let currentMin = 0;
             let sessionCount = 0;
             
-            let currentTime = new Date();
+            let avgCycleTime = sessionLen + 5; 
+            let approxSessions = Math.floor(totalMinutes / avgCycleTime);
+            if (approxSessions === 0) approxSessions = 1;
             
-            while (currentMin < totalMinutes) {
-                // Pomodoro Block
-                let pTime = timerSettings.pomodoro;
-                blocks.push({ type: 'focus', duration: pTime, title: subject });
-                currentMin += pTime;
+            subjects.forEach(sub => {
+                sub.quota = Math.round((sub.priority / totalWeight) * approxSessions);
+                if (sub.quota === 0) sub.quota = 1; 
+            });
+            
+            // Sort by difficulty (Hard first, as standard approach to tackle tough tasks early)
+            subjects.sort((a, b) => {
+                const diffMap = { 'hard': 3, 'medium': 2, 'easy': 1 };
+                return diffMap[b.difficulty] - diffMap[a.difficulty];
+            });
+
+            // Alternate subjects smoothly
+            let sessionList = [];
+            while(true) {
+                let added = false;
+                subjects.forEach(sub => {
+                    if (sub.quota > 0) {
+                        sessionList.push(sub.name);
+                        sub.quota--;
+                        added = true;
+                    }
+                });
+                if (!added) break;
+            }
+            
+            let currentTime = new Date(start);
+            let sessionIdx = 0;
+            
+            while (currentMin < totalMinutes && sessionIdx < sessionList.length) {
+                // Focus Block
+                blocks.push({ type: 'focus', duration: sessionLen, title: sessionList[sessionIdx] });
+                currentMin += sessionLen;
+                sessionIdx++;
                 sessionCount++;
                 
-                if (currentMin >= totalMinutes) break;
+                if (currentMin >= totalMinutes || sessionIdx >= sessionList.length) break;
                 
                 // Break Block
-                if (sessionCount % 4 === 0) {
-                    blocks.push({ type: 'break', duration: timerSettings.longBreak, title: 'Long Break' });
+                if (sessionCount % 3 === 0) {
+                    blocks.push({ type: 'break', duration: 15, title: 'Long Break' });
+                    currentMin += 15;
                 } else {
-                    blocks.push({ type: 'break', duration: timerSettings.shortBreak, title: 'Short Break' });
+                    blocks.push({ type: 'break', duration: 5, title: 'Short Break' });
+                    currentMin += 5;
+                }
+            }
+            
+            // Fill remaining time
+            while (currentMin + sessionLen <= totalMinutes) {
+                 blocks.push({ type: 'focus', duration: sessionLen, title: subjects[0].name + " (Review)" });
+                 currentMin += sessionLen;
+                 sessionCount++;
+                 if (currentMin >= totalMinutes) break;
+                 if (sessionCount % 3 === 0) {
+                    blocks.push({ type: 'break', duration: 15, title: 'Long Break' });
+                    currentMin += 15;
+                } else {
+                    blocks.push({ type: 'break', duration: 5, title: 'Short Break' });
+                    currentMin += 5;
                 }
             }
             
@@ -599,6 +848,8 @@ function setupDashboard(user) {
                         remoteAudio.srcObject = remoteStream;
                         addFriendToList(call.peer);
                         showToast("Friend joined the room!", "fa-users");
+                        const endVoiceBtn = document.getElementById('endVoiceBtn');
+                        if (endVoiceBtn) endVoiceBtn.style.display = 'inline-flex';
                     });
                     
                     call.on('close', () => {
@@ -671,13 +922,55 @@ function setupDashboard(user) {
                 joinVoiceBtn.innerHTML = '<i class="fa-solid fa-phone-flip"></i> Connected';
                 addFriendToList(friendId);
                 showToast("Connected to room!", "fa-check");
+                const endVoiceBtn = document.getElementById('endVoiceBtn');
+                if (endVoiceBtn) {
+                    endVoiceBtn.style.display = 'inline-flex';
+                    joinVoiceBtn.style.display = 'none';
+                }
             });
             
             call.on('close', () => {
                 const el = document.getElementById(`peer-${friendId}`);
                 if(el) el.remove();
-                joinVoiceBtn.innerHTML = '<i class="fa-solid fa-phone-flip"></i> Join Room';
+                joinVoiceBtn.innerHTML = '<i class="fa-solid fa-phone-flip"></i> Join';
+                joinVoiceBtn.style.display = 'inline-flex';
                 joinVoiceBtn.disabled = false;
+                const endVoiceBtn = document.getElementById('endVoiceBtn');
+                if (endVoiceBtn) endVoiceBtn.style.display = 'none';
+            });
+        }
+
+        const endVoiceBtn = document.getElementById('endVoiceBtn');
+        if (endVoiceBtn) {
+            endVoiceBtn.addEventListener('click', () => {
+                if (currentCall) {
+                    currentCall.close();
+                }
+                if (peer) {
+                    peer.destroy();
+                    peer = null;
+                }
+                if (localStream) {
+                    localStream.getTracks().forEach(track => track.stop());
+                    localStream = null;
+                }
+                groupStudyList.innerHTML = `
+                    <li class="user-item">
+                        <div class="user-avatar"><i class="fa-solid fa-user"></i></div>
+                        <div style="flex: 1;">You</div>
+                        <div class="user-status" id="myVoiceStatus" style="background: #ccc;"></div>
+                    </li>
+                `;
+                remoteAudio.srcObject = null;
+                voiceRoomControls.style.display = 'none';
+                startVoiceBtn.style.display = 'inline-flex';
+                startVoiceBtn.disabled = false;
+                startVoiceBtn.innerHTML = '<i class="fa-solid fa-microphone"></i> Start';
+                joinVoiceBtn.style.display = 'inline-flex';
+                joinVoiceBtn.disabled = false;
+                joinVoiceBtn.innerHTML = '<i class="fa-solid fa-phone-flip"></i> Join';
+                endVoiceBtn.style.display = 'none';
+                showToast("Call ended", "fa-phone-slash");
             });
         }
 
@@ -804,12 +1097,21 @@ function setupAI(isLoggedin, user = null) {
         else if (hour < 18) suggestion = "Afternoon energy dip? Try a 25-minute Pomodoro session to regain momentum.";
         else suggestion = "Evening study. Keep the lighting warm and focus on reviewing material rather than new complex concepts.";
     } else {
+        const uncompletedGoals = user.goals.filter(g => !g.completed).length;
+        const streak = user.stats.streak || 0;
+        
         if (user.stats.distractions > 5) {
             suggestion = "You've logged a few distractions. Consider entering Fullscreen Focus Mode and putting your phone in another room.";
+        } else if (uncompletedGoals > 0 && hour < 18) {
+            suggestion = `You have ${uncompletedGoals} goal(s) left. Break them down and tackle the hardest one using a Pomodoro!`;
+        } else if (streak >= 3) {
+            suggestion = `You're on a ${streak}-day streak! Keep the momentum going, consistency is the key to real learning.`;
         } else if (user.stats.sessionsCompleted === 0) {
             suggestion = "Ready to start your first session of the day? Try setting a small, achievable goal first.";
+        } else if (hour >= 20) {
+            suggestion = `Great job today with ${user.stats.points} points. Make sure to wind down soon to consolidate your memory.`;
         } else {
-            suggestion = `Great job completing ${user.stats.sessionsCompleted} sessions! You're building a solid habit. Stay hydrated!`;
+            suggestion = `You're doing great! Keep up the pace. Don't forget to write summaries for completed goals to earn extra points.`;
         }
     }
 

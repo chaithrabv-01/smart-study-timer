@@ -87,13 +87,51 @@
                 </div>
 
                 <div class="glass-card">
-                    <h3>Study Planner</h3>
-                    <div class="flex-col" style="gap: 0.5rem;">
-                        <input type="text" id="plannerSubject" class="form-input" placeholder="Subject (e.g. Math)">
-                        <input type="number" id="plannerHours" class="form-input" placeholder="Hours (e.g. 2)" min="0.5" step="0.5">
-                        <button class="btn btn-primary" id="generatePlanBtn" style="width: 100%;"><i class="fa-solid fa-calendar-days"></i> Generate Timetable</button>
+                    <h3>Smart Study Planner</h3>
+                    <div class="flex-col" id="plannerForm" style="gap: 0.5rem;">
+                        <div id="subjectList" class="flex-col" style="gap: 0.5rem; max-height: 180px; overflow-y: auto; padding-right: 0.5rem;">
+                            <div class="subject-entry flex-col" style="border: 1px solid var(--card-border); padding: 0.5rem; border-radius: 8px; gap: 0.5rem;">
+                                <div class="flex-between">
+                                    <input type="text" class="form-input subject-name" placeholder="Subject (e.g. Math)" style="flex: 1;">
+                                </div>
+                                <div class="flex-between" style="gap: 0.5rem;">
+                                    <select class="form-input subject-priority" style="padding: 0.5rem; font-size: 0.8rem;">
+                                        <option value="3">High Priority</option>
+                                        <option value="2">Medium Priority</option>
+                                        <option value="1">Low Priority</option>
+                                    </select>
+                                    <select class="form-input subject-difficulty" style="padding: 0.5rem; font-size: 0.8rem;">
+                                        <option value="hard">Hard</option>
+                                        <option value="medium">Medium</option>
+                                        <option value="easy">Easy</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-outline" id="addSubjectBtn" style="padding: 0.4rem; font-size: 0.8rem;"><i class="fa-solid fa-plus"></i> Add Subject</button>
+                        
+                        <div class="flex-between" style="gap: 0.5rem; margin-top: 0.5rem;">
+                            <input type="time" id="plannerStartTime" class="form-input" title="Start Time" value="18:00">
+                            <span style="font-size: 0.9rem; font-weight: 600;">to</span>
+                            <input type="time" id="plannerEndTime" class="form-input" title="End Time" value="22:00">
+                        </div>
+                        
+                        <div class="flex-between" style="gap: 0.5rem;">
+                            <select id="plannerSessionLen" class="form-input" style="padding: 0.5rem; font-size: 0.8rem;" title="Session Duration">
+                                <option value="25">25 mins / session</option>
+                                <option value="45">45 mins / session</option>
+                                <option value="60">60 mins / session</option>
+                            </select>
+                            <select id="plannerPeakFocus" class="form-input" style="padding: 0.5rem; font-size: 0.8rem;" title="Peak Focus Time">
+                                <option value="morning">Morning Peak</option>
+                                <option value="afternoon">Afternoon Peak</option>
+                                <option value="evening" selected>Evening Peak</option>
+                            </select>
+                        </div>
+                        
+                        <button class="btn btn-primary mt-1" id="generatePlanBtn" style="width: 100%;"><i class="fa-solid fa-wand-magic-sparkles"></i> Generate Plan</button>
                     </div>
-                    <div class="timetable-container mt-1" id="timetableContainer" style="display: none; max-height: 200px; overflow-y: auto;">
+                    <div class="timetable-container mt-1" id="timetableContainer" style="display: none; max-height: 250px; overflow-y: auto;">
                         <!-- Generated timetable items go here -->
                     </div>
                 </div>
@@ -103,8 +141,9 @@
             <div class="flex-col" style="gap: 1.5rem;">
                 <div class="glass-card">
                     <h3>Daily Goals</h3>
-                    <div class="flex-between mb-1">
-                        <input type="text" id="goalInput" class="form-input" placeholder="Add new goal..." style="margin-right: 0.5rem;">
+                    <div class="flex-between mb-1" style="gap: 0.5rem;">
+                        <input type="text" id="goalInput" class="form-input" placeholder="Goal (e.g. Study DBMS)" style="flex: 2;">
+                        <input type="number" id="goalTimeInput" class="form-input" placeholder="Mins" style="flex: 1; min-width: 60px;" min="1">
                         <button class="btn btn-primary" id="addGoalBtn"><i class="fa-solid fa-plus"></i></button>
                     </div>
                     <ul class="goal-list" id="goalList">
@@ -132,7 +171,10 @@
 
                     <div class="flex-col" style="gap: 0.5rem; margin-bottom: 1rem;">
                         <input type="text" id="friendRoomId" class="form-input" placeholder="Enter Friend's Room ID" style="font-size: 0.85rem; padding: 0.5rem;">
-                        <button class="btn btn-primary" id="joinVoiceBtn" style="width: 100%; font-size: 0.85rem;"><i class="fa-solid fa-phone-flip"></i> Join Room</button>
+                        <div class="flex-between" style="gap: 0.5rem;">
+                            <button class="btn btn-primary" id="joinVoiceBtn" style="width: 100%; font-size: 0.85rem;"><i class="fa-solid fa-phone-flip"></i> Join</button>
+                            <button class="btn btn-danger" id="endVoiceBtn" style="width: 100%; font-size: 0.85rem; display: none;"><i class="fa-solid fa-phone-slash"></i> End Call</button>
+                        </div>
                     </div>
 
                     <ul class="user-list" id="groupStudyList">
@@ -170,6 +212,21 @@
                         <input type="number" id="longBreakSetting" class="form-input" min="1" value="15">
                     </div>
                     <button class="btn btn-primary mt-1" id="saveSettingsBtn" style="width: 100%;">Save Changes</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Goal Summary Modal -->
+        <div class="modal" id="goalSummaryModal">
+            <div class="modal-content glass-card">
+                <div class="modal-header">
+                    <h3>Goal Completed!</h3>
+                    <button class="close-modal" id="closeGoalSummaryBtn"><i class="fa-solid fa-xmark"></i></button>
+                </div>
+                <div class="settings-form">
+                    <p style="font-size: 0.9rem; margin-bottom: 1rem; opacity: 0.9;">Write a short summary of what you accomplished to earn your points!</p>
+                    <textarea id="goalSummaryText" class="form-input" rows="3" placeholder="I learned about..."></textarea>
+                    <button class="btn btn-success mt-1" id="submitGoalSummaryBtn" style="width: 100%; background-color: var(--success-color); color: white; border: none; padding: 0.75rem; border-radius: 12px; font-weight: 600; cursor: pointer;">Submit & Earn Points</button>
                 </div>
             </div>
         </div>
